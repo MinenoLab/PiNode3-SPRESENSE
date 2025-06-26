@@ -39,10 +39,12 @@ class SpresenseCameraChecker:
         self.progress.start(10)
 
         ret, frame = self.spresense.read()
-        frame = cv2.resize(frame, (640, 480))
         if ret:
+            frame = cv2.resize(frame, (640, 480))
             self.photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))) # type: ignore
             self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
+        else:
+            print("Data could NOT be received.")
 
         self.progress.stop()
         self.progress_explain.place_forget()

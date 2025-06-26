@@ -3,3 +3,4 @@ cobs==1.2.1
 pyserial==3.5
 opencv-python==4.8.1.78
 pillow==10.1.0
+crcmod==1.7

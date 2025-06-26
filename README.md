@@ -1,13 +1,12 @@
 # README
 
 ## 概要
-このプロジェクトは、SPRESENSEを使用し、ノートPCでデータを確認するためのツールを提供します。ArduinoおよびPythonコンポーネントに加えて、便利な代替手段として実行可能なファイルも含まれています。
+このプロジェクトは、SPRESENSEを使用し、ノートPCでデータを確認するためのツールを提供します。
 
 ## ファイル構成
 ```
 C:.
 │  .gitattributes
-│  image_checker.zip
 │  README.md
 │
 ├─arduino
@@ -26,7 +25,9 @@ C:.
 ## 手順
 
 ### SPRESENSEのセットアップ
-1. `arduino`フォルダ内の`arduino.ino`ファイルをSPRESENSEデバイスに書き込んでください。
+1. Arduino IDEのメニューから\[ツール\]-\[Memory\]設定を`1536KB`に変更してください。
+2. `arduino`フォルダ内の`arduino.ino`ファイルをSPRESENSEデバイスに書き込んでください。
+
 
 ### ノートPCでのデータ確認
 - Python環境を使用する場合、`Python/image_checker.py`スクリプトを実行してください。

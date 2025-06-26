@@ -2,36 +2,38 @@ from cobs import cobs
 import numpy as np
 import cv2
 import time
+import crcmod
 
 class Spresense:
-    BAUD_RATE = 115200  # ボーレート
-    BUFF_SIZE = 100  # 1回の通信で送られてくるデータサイズ
-    TYPE_INFO = 0
-    TYPE_IMAGE = 1
+    BAUD_RATE   = 115200  # ボーレート
+    TYPE_INFO   = 0
+    TYPE_IMAGE  = 1
     TYPE_FINISH = 2
-    TYPE_ERROR = 3
+    TYPE_ERROR  = 3
 
     def __init__(self, ser) -> None:
         super().__init__()
         self.ser = ser
 
     def get_packet(self):
-        try:
-            img = bytearray()
-            while True:
-                val = self.ser.read()
-                if val == b'\x00':
-                    break
-                img += val
-            decoded = cobs.decode(img)
-            index = int(decoded[1]) * 1000 + int(decoded[2]) * 100 + int(decoded[3]) * 10 + int(decoded[4])
-            return decoded[0], index, decoded[5:]
-        except Exception as e:
-            return self.TYPE_ERROR, 0, b''
+        buf = bytearray()
+        while True:
+            val = self.ser.read()
+            if val == b'\x00':
+                break
+            buf += val
+        decoded = cobs.decode(buf)
+
+        index = int(decoded[1]) * 1000 + int(decoded[2]) * 100 + int(decoded[3]) * 10 + int(decoded[4])
+        crc8_func = crcmod.predefined.mkCrcFun('crc-8-maxim')
+        crc = crc8_func(decoded[0:-1])
+        return (crc == decoded[-1]), decoded[0], index, decoded[5:-1]
 
     def check_packet(self, data):
-        if len(data) != self.BUFF_SIZE:
-            return False
+        # if len(data) != self.BUFF_SIZE:
+        #     return False
+        #TODO CRCチェックに変える
+        # print(len(data))
         return True
 
     def send_request_image(self):
@@ -49,47 +51,59 @@ class Spresense:
         finish_flag = False
         send_flg = []
 
+        start = time.time()
+
+        # 1. 送信要求
         self.send_request_image()
 
+        # 2. INFOパケット待ち
         while True:
-            code, index, data = self.get_packet()
-
-            # データ取得
-            if code == self.TYPE_INFO:
-                img = bytearray(index * self.BUFF_SIZE)
+            crc, code, index, data = self.get_packet()
+            if crc and (code == self.TYPE_INFO):
                 max_index = index
-                send_flg = [False] * max_index
-            elif code == self.TYPE_IMAGE:
-                if self.check_packet(data):
-                    img[index*self.BUFF_SIZE:(index+1)*self.BUFF_SIZE] = data
-                    send_flg[index] = True
-                    if index in resend_index_list:
-                        resend_index_list.remove(index)
-                else:
-                    resend_index_list.append(index)
-            elif code == self.TYPE_FINISH:
-                img += data
-                finish_flag = True
-            elif code == self.TYPE_ERROR:
-                print('cant get data')
+                buf = [None] * (max_index + 1)
+                print("INFO:", max_index)
+                break
+            else:
+                # 再送要求
+                self.send_request_image()
 
-            # 終了チェック
-            if finish_flag:
-                if False in send_flg:
-                    print("resend", send_flg.index(False))
-                    self.send_request_resend(send_flg.index(False))
-                for index in resend_index_list:
-                    self.send_request_resend(index)
-                if (len(resend_index_list) == 0) and (not (False in send_flg)):
-                    self.send_complete_image()
-                    break
-        return img
+        # 3. 画像データ受信
+        for i in range(len(buf)):
+            crc, code, index, data = self.get_packet()
+            if crc:
+                if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
+                    buf[index] = data
+
+        # 4. 再送要求（１回まで）
+        for i in range(len(buf)):
+            if buf[i] is None:
+                print("RETRY:", i)
+                self.send_request_resend(i)
+                crc, code, index, data = self.get_packet()
+                if crc:
+                    if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
+                        buf[i] = data
+
+        # 5. 終了送信
+        self.send_complete_image()
+        end = time.time()
+        print("Elapsed:", end - start)
+
+        if None in buf:
+            return None
+        else:
+            img = bytearray(b''.join(buf))
+            return img
 
     def read(self):
-        img = self.get_image_data()
-        img = cv2.imdecode(np.frombuffer(img, dtype='uint8'), 1)
-        print("shoot image success")
-        return True, img
+        try:
+            img = self.get_image_data()
+            img = cv2.imdecode(np.frombuffer(img, dtype='uint8'), cv2.IMREAD_COLOR)
+            print("shoot image success")
+            return True, img
+        except TypeError:
+            return False, None
 
 if __name__ == '__main__':
     import serial
