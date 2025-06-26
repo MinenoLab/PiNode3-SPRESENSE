@@ -12,7 +12,6 @@ class Spresense:
     TYPE_ERROR  = 3
 
     def __init__(self, ser) -> None:
-        super().__init__()
         self.ser = ser
 
     def get_packet(self):
@@ -24,17 +23,14 @@ class Spresense:
             buf += val
         decoded = cobs.decode(buf)
 
-        index = int(decoded[1]) * 1000 + int(decoded[2]) * 100 + int(decoded[3]) * 10 + int(decoded[4])
         crc8_func = crcmod.predefined.mkCrcFun('crc-8-maxim')
         crc = crc8_func(decoded[0:-1])
-        return (crc == decoded[-1]), decoded[0], index, decoded[5:-1]
+        is_crc_valid = (crc == decoded[-1])
+        packet_type = decoded[0]
+        index = int(decoded[1]) * 1000 + int(decoded[2]) * 100 + int(decoded[3]) * 10 + int(decoded[4])
+        payload = decoded[5:-1]
 
-    def check_packet(self, data):
-        # if len(data) != self.BUFF_SIZE:
-        #     return False
-        #TODO CRCチェックに変える
-        # print(len(data))
-        return True
+        return is_crc_valid, packet_type, index, payload
 
     def send_request_image(self):
         self.ser.write(str.encode('S\n'))
@@ -46,11 +42,6 @@ class Spresense:
         self.ser.write(str.encode(f'R{index}\n'))
 
     def get_image_data(self):
-        img = bytearray()
-        resend_index_list = []
-        finish_flag = False
-        send_flg = []
-
         start = time.time()
 
         # 1. 送信要求
@@ -58,8 +49,8 @@ class Spresense:
 
         # 2. INFOパケット待ち
         while True:
-            crc, code, index, data = self.get_packet()
-            if crc and (code == self.TYPE_INFO):
+            ret, code, index, data = self.get_packet()
+            if ret and (code == self.TYPE_INFO):
                 max_index = index
                 buf = [None] * (max_index + 1)
                 print("INFO:", max_index)
@@ -70,8 +61,8 @@ class Spresense:
 
         # 3. 画像データ受信
         for i in range(len(buf)):
-            crc, code, index, data = self.get_packet()
-            if crc:
+            ret, code, index, data = self.get_packet()
+            if ret:
                 if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
                     buf[index] = data
 
@@ -80,8 +71,8 @@ class Spresense:
             if buf[i] is None:
                 print("RETRY:", i)
                 self.send_request_resend(i)
-                crc, code, index, data = self.get_packet()
-                if crc:
+                ret, code, index, data = self.get_packet()
+                if ret:
                     if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
                         buf[i] = data
 
@@ -105,15 +96,3 @@ class Spresense:
         except TypeError:
             return False, None
 
-if __name__ == '__main__':
-    import serial
-    ser = serial.Serial('COM9', 115200, timeout=1)
-    print("connecting...")
-    time.sleep(10)
-    spresense = Spresense(ser)
-    ret, img = spresense.read()
-    if ret:
-        cv2.imshow('img', img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-    ser.close()
