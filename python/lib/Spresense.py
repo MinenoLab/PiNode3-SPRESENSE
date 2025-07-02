@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import time
 import crcmod
+import serial
 
 class Spresense:
     BAUD_RATE   = 115200  # ボーレート
@@ -14,12 +15,16 @@ class Spresense:
     def __init__(self, ser) -> None:
         self.ser = ser
 
-    def get_packet(self):
+    def get_packet(self, timeout=3):
         buf = bytearray()
+        start = time.time()
         while True:
             val = self.ser.read()
             if val == b'\x00':
                 break
+            elif time.time() - start > timeout:
+                print("get_packet timeout")
+                return False, None, None, None
             buf += val
         decoded = cobs.decode(buf)
 
@@ -29,11 +34,13 @@ class Spresense:
         packet_type = decoded[0]
         index = int(decoded[1]) * 1000 + int(decoded[2]) * 100 + int(decoded[3]) * 10 + int(decoded[4])
         payload = decoded[5:-1]
-
         return is_crc_valid, packet_type, index, payload
 
     def send_request_image(self):
         self.ser.write(str.encode('S\n'))
+
+    def send_request_thumbnail(self):
+        self.ser.write(str.encode('V\n'))
 
     def send_complete_image(self):
         self.ser.write(str.encode('E\n'))
@@ -41,58 +48,60 @@ class Spresense:
     def send_request_resend(self, index):
         self.ser.write(str.encode(f'R{index}\n'))
 
-    def get_image_data(self):
+    def get_image(self, thumbnail=False):
         start = time.time()
 
-        # 1. 送信要求
-        self.send_request_image()
+        if thumbnail:
+            send_request = self.send_request_thumbnail
+        else:
+            send_request = self.send_request_image
 
-        # 2. INFOパケット待ち
-        while True:
+        try:
+            # 1. 送信要求
+            send_request()
+
+            # 2. INFOパケット待ち
             ret, code, index, data = self.get_packet()
             if ret and (code == self.TYPE_INFO):
                 max_index = index
                 buf = [None] * (max_index + 1)
                 print("INFO:", max_index)
-                break
             else:
-                # 再送要求
-                self.send_request_image()
+                print("Don't receive INFO paket")
+                return False, None
 
-        # 3. 画像データ受信
-        for i in range(len(buf)):
-            ret, code, index, data = self.get_packet()
-            if ret:
-                if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
-                    buf[index] = data
-
-        # 4. 再送要求（１回まで）
-        for i in range(len(buf)):
-            if buf[i] is None:
-                print("RETRY:", i)
-                self.send_request_resend(i)
+            # 3. 画像データ受信
+            for i in range(len(buf)):
                 ret, code, index, data = self.get_packet()
+                print("IMAGE:", ret, code, index, len(data))
                 if ret:
                     if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
-                        buf[i] = data
+                        buf[index] = data
 
-        # 5. 終了送信
-        self.send_complete_image()
-        end = time.time()
-        print("Elapsed:", end - start)
+            # 4. 再送要求（１回まで）
+            for i in range(len(buf)):
+                if buf[i] is None:
+                    print("RETRY:", i)
+                    self.send_request_resend(i)
+                    ret, code, index, data = self.get_packet()
+                    if ret:
+                        if (code == self.TYPE_IMAGE) or (code == self.TYPE_FINISH):
+                            buf[i] = data
 
-        if None in buf:
-            return None
-        else:
+            # 5. 終了送信
+            self.send_complete_image()
+            end = time.time()
+            print("Elapsed:", end - start)
+
             img = bytearray(b''.join(buf))
-            return img
-
-    def read(self):
-        try:
-            img = self.get_image_data()
             img = cv2.imdecode(np.frombuffer(img, dtype='uint8'), cv2.IMREAD_COLOR)
-            print("shoot image success")
-            return True, img
+            if img is None:
+                return False, None
+            else:
+                return True, img
         except TypeError:
             return False, None
-
+        except cv2.error:
+            return False, None
+        except serial.SerialException:
+            return False, None

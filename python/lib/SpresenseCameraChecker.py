@@ -29,17 +29,21 @@ class SpresenseCameraChecker:
         self.progress = ttk.Progressbar(window, orient='horizontal', length=100, mode='indeterminate')
         self.progress_explain = tk.Label(window, text="Capturing...", font=("Helvetica", 16))
 
-
+        self.is_thumbnail = tk.BooleanVar()
+        self.thumbnail_checkbox = tk.Checkbutton(window, text="Thumbnail", variable=self.is_thumbnail)
+        self.thumbnail_checkbox.pack(pady=10)
 
         self.window.mainloop()
 
     def update_image(self):
+        self.btn_snapshot.config(state="disabled")
         self.progress.place(x=320, y=240, anchor=tk.CENTER)
         self.progress_explain.place(x=320, y=200, anchor=tk.CENTER)
         self.progress.start(10)
 
-        ret, frame = self.spresense.read()
+        ret, frame = self.spresense.get_image(self.is_thumbnail.get())
         if ret:
+            print("shoot image success")
             frame = cv2.resize(frame, (640, 480))
             self.photo = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))) # type: ignore
             self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
@@ -49,6 +53,7 @@ class SpresenseCameraChecker:
         self.progress.stop()
         self.progress_explain.place_forget()
         self.progress.place_forget()
+        self.btn_snapshot.config(state="normal")
 
     def update(self):
         t = threading.Thread(target=self.update_image)
